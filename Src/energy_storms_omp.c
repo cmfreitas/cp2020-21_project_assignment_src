@@ -57,8 +57,10 @@ void update( float *layer, int layer_size, int k, int pos, float energy ) {
     float energy_k = energy / layer_size / atenuacion;
 
     /* 5. Do not add if its absolute value is lower than the threshold */
+    
     if ( energy_k >= THRESHOLD / layer_size || energy_k <= -THRESHOLD / layer_size )
         layer[k] = layer[k] + energy_k;
+    
 }
 
 
@@ -148,6 +150,8 @@ Storm read_storm_file( char *fname ) {
  */
 int main(int argc, char *argv[]) {
     int i,j,k;
+    
+    printf("Inicio main");
 
     /* 1.1. Read arguments */
     if (argc<3) {
@@ -198,6 +202,9 @@ int main(int argc, char *argv[]) {
         layer_copy[k] = 0.0f;
     }
     
+    
+    printf("Antes dos 3 nested fors");
+    
     //TODO: Esta parte faz o trabalho todo da simulacao, retirar dependencias e paralelizar o codigo
     /* 4. Storms simulation */
     /*
@@ -210,6 +217,10 @@ int main(int argc, char *argv[]) {
     //provavelmente melhora o tempo
     //o resultado pode estar errado com este pragma falta testes, o vetor layer e partilhado entre eles
     //talvez a solucao seja calcular o resultado separadamente e depois juntar as varias storms
+    
+    //!!!! Nao sei se isto é parallelizado, talvez é mas é preciso manter a ordem
+    
+    
     //#pragma opm parallel for
     for( i=0; i<num_storms; i++ ) {
 
@@ -219,24 +230,72 @@ int main(int argc, char *argv[]) {
         //o resultado fica errado porque esta a ser partilhado o vetor soma das energias para cada particao da superficie
         //e necessario proteger a variavel ou computar de outa maneira o resultado
         //TODO: grande parte do trabalho esta aqui, vale a pena paralelizar
-        //#pragma omp parallel for
-        for( j=0; j<storms[i].size; j++ ) {
-            /* Get impact energy (expressed in thousandths) */
-            float energy = (float)storms[i].posval[j*2+1] * 1000;
-            /* Get impact position */
-            int position = storms[i].posval[j*2];
+        printf("Aqui\n");
+        int max_thread_num = omp_get_max_threads();
+        printf("Max thread num: %d thread(s)\n", max_thread_num);
+        int individualLayer_size = layer_size * max_thread_num;
+        printf("Layer size: %d\nIndividualLayerSize:%d\n", layer_size, individualLayer_size);
+        float *individualLayer = (float *)malloc( sizeof(float) * individualLayer_size ) ;
+        
+        //init array
+        for( k=0; k<individualLayer_size; k++ ) {
+        	individualLayer[k] = 0.0f;
+    	}
+        
+        omp_set_num_threads(1);
+        #pragma omp parallel
+        {
+            int thread_num = omp_get_thread_num();
+            printf("ThreadNum: %d\n", thread_num);
+            
+            float *privateLayer;
+            int storm_size;
+            int p_layer_size;
+            
+            #pragma omp critical // TODO: talvez tirar isto tava so a testar
+            {
+		    privateLayer = individualLayer + layer_size * thread_num;
+		    //printf("Private layer: %p\n", privateLayer);
+		    //printf("%p\n", individualLayer);
+		    storm_size = storms[i].size; // nao sei se vale a pena mas e para nao aceder todas as vezes que faz o loop
+		    p_layer_size = layer_size;
+            }
 
-            /* For each cell in the layer */
+            #pragma omp for
+            for (j = 0; j < storm_size; j++) {
+                /* Get impact energy (expressed in thousandths) */
+                float energy = (float) storms[i].posval[j * 2 + 1] * 1000;
+                /* Get impact position */
+                int position = storms[i].posval[j * 2];
+
+                /* For each cell in the layer */
 //TODO: Verificar quantos pontos e que este loop percorre normalmente e ver se e sufuciente para parallelizar
-            //os tempos com este pragma ficam piores, provavelmente tem dependencias
-            //os valores de k só variam de 1 ate layer_size, sendo o valor de layer_size pequeno siginifica
-            //quantas particoes da superficie temos. A menos que a superficie seja grande, nao vale a pena
-            //#pragma omp parallel for
-            for( k=0; k<layer_size; k++ ) {
-                /* Update the energy value for the cell */
-                update( layer, layer_size, k, position, energy );
+                //os tempos com este pragma ficam piores, provavelmente tem dependencias
+                //os valores de k só variam de 1 ate layer_size, sendo o valor de layer_size pequeno siginifica
+                //quantas particoes da superficie temos. A menos que a superficie seja grande, nao vale a pena
+                //#pragma omp parallel 
+                
+                // !!!!! preciso por esta variavel local, para nao se parallelizada!!!!!
+                for (int k = 0; k < layer_size; k++) {
+                    /* Update the energy value for the cell */
+                    update(privateLayer, layer_size, k, position, energy);
+                }
+	     }
+	}
+
+        //juntar resultados
+        //#pragma omp parallel for
+        //ver se istp vale a pena
+        // se usar menos threads que o maximo ira estar a somar zeros, 
+        //preciso arranjar outra forma de ver quantas threads foram usadas
+        for (k = 0; k < layer_size; k++) {
+            for (int l = 0; l < max_thread_num; l++) { 
+                layer[k] += individualLayer[k + layer_size * l];
             }
         }
+
+        
+        free(individualLayer);
 
         /* 4.2. Energy relaxation between storms */
         /* 4.2.1. Copy values to the ancillary array */
@@ -268,6 +327,7 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+
     }
 
     /* END: Do NOT optimize/parallelize the code below this point */
