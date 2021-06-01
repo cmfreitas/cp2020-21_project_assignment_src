@@ -275,7 +275,6 @@ int main(int argc, char *argv[]) {
                 //quantas particoes da superficie temos. A menos que a superficie seja grande, nao vale a pena
                 //#pragma omp parallel 
                 
-                
                 // !!!!! preciso por esta variavel local, para nao se parallelizada!!!!!
                 for (int k = 0; k < layer_size; k++) {
                     /* Update the energy value for the cell */
