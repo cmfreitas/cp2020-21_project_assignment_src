@@ -121,16 +121,6 @@ Storm read_storm_file( char *fname ) {
         exit( EXIT_FAILURE );
     }
     
-    
-    
-    //TODO: Talvez isto pode ser paralelizado:> ver melhor por causa do scanf, pois será preciso fazer seek() ou assim
-    // passei a declaracao do elem para dentro do for e o ok privatizado localmente
-    /*
-     * Confirmar isto, nao sei bem como o programa ira comportar se com o fscanf e se vale a pena paralelizar
-     * Mas nao tem dependencias no vetor, cada particao ira aceder a sua parte do vetor
-     * Sera que vale a pena parallelizar, nao vao estar numa corrida pelo ficheiro?
-     */
-    //#pragma omp parallel for
     for ( int elem=0; elem<storm.size; elem++ ) {
         int ok = fscanf(fstorm, "%d %d\n",
                     &(storm.posval[elem*2]),
@@ -149,10 +139,7 @@ Storm read_storm_file( char *fname ) {
  * MAIN PROGRAM
  */
 int main(int argc, char *argv[]) {
-    int i,j,k;
     
-    printf("Inicio main");
-
     /* 1.1. Read arguments */
     if (argc<3) {
         fprintf(stderr,"Usage: %s <size> <storm_1_file> [ <storm_i_file> ] ... \n", argv[0] );
@@ -164,13 +151,13 @@ int main(int argc, char *argv[]) {
     Storm storms[ num_storms ];
 
     /* 1.2. Read storms information */
-    for( i=2; i<argc; i++ ) 
+    for( int i=2; i<argc; i++ ) 
         storms[i-2] = read_storm_file( argv[i] );
 
     /* 1.3. Intialize maximum levels to zero */
     float maximum[ num_storms ];
     int positions[ num_storms ];
-    for (i=0; i<num_storms; i++) {
+    for (int i=0; i<num_storms; i++) {
         maximum[i] = 0.0f;
         positions[i] = 0;
     }
@@ -187,148 +174,107 @@ int main(int argc, char *argv[]) {
         fprintf(stderr,"Error: Allocating the layer memory\n");
         exit( EXIT_FAILURE );
     }
-    //TODO: Estes 2 for podem ser paralelizados provavelmente, ver mlehor se tem dependencias, inicializacao do vetor
-    /*
-     * confirmar isto e ver se divide o trabalho como e suposto ou nao
-     * sera que vale a pena fazer a paralelização so para a inicializacao dos vetores
-     *
-     * retirei os dois for e juntei as instrucoes num so
-     */
-
-    //TODO: verificar os valores de layer_size
-    //#pragma omp parallel for
-    for( k=0; k<layer_size; k++ ) {
-        layer[k] = 0.0f;
-        layer_copy[k] = 0.0f;
-    }
     
     
-    printf("Antes dos 3 nested fors");
-    
-    //TODO: Esta parte faz o trabalho todo da simulacao, retirar dependencias e paralelizar o codigo
-    /* 4. Storms simulation */
-    /*
-     *
-     * Verificar como o openMP faz handle de nested loops, devo usar um #omp parallel for dentro do loop
-     * ou devo usar o #pragma omp parallel for collapse(2)
-     * verificar como e onde e melhor usar parallel for
-     *
-     */
-    //provavelmente melhora o tempo
-    //o resultado pode estar errado com este pragma falta testes, o vetor layer e partilhado entre eles
-    //talvez a solucao seja calcular o resultado separadamente e depois juntar as varias storms
-    
-    //!!!! Nao sei se isto é parallelizado, talvez é mas é preciso manter a ordem
-    
-    
-    //#pragma opm parallel for
-    for( i=0; i<num_storms; i++ ) {
-
-        /* 4.1. Add impacts energies to layer cells */
-        /* For each particle */
-        //este pragma faz com que o resultado fique errado, provavelmente tem dependencias
-        //o resultado fica errado porque esta a ser partilhado o vetor soma das energias para cada particao da superficie
-        //e necessario proteger a variavel ou computar de outa maneira o resultado
-        //TODO: grande parte do trabalho esta aqui, vale a pena paralelizar
-        printf("Aqui\n");
-        int max_thread_num = omp_get_max_threads();
-        printf("Max thread num: %d thread(s)\n", max_thread_num);
-        int individualLayer_size = layer_size * max_thread_num;
-        printf("Layer size: %d\nIndividualLayerSize:%d\n", layer_size, individualLayer_size);
-        float *individualLayer = (float *)malloc( sizeof(float) * individualLayer_size ) ;
-        
-        //init array
-        for( k=0; k<individualLayer_size; k++ ) {
-        	individualLayer[k] = 0.0f;
-    	}
-        
-        omp_set_num_threads(1);
-        #pragma omp parallel
-        {
-            int thread_num = omp_get_thread_num();
-            printf("ThreadNum: %d\n", thread_num);
-            
-            float *privateLayer;
-            int storm_size;
-            int p_layer_size;
-            
-            #pragma omp critical // TODO: talvez tirar isto tava so a testar
-            {
-		    privateLayer = individualLayer + layer_size * thread_num;
-		    //printf("Private layer: %p\n", privateLayer);
-		    //printf("%p\n", individualLayer);
-		    storm_size = storms[i].size; // nao sei se vale a pena mas e para nao aceder todas as vezes que faz o loop
-		    p_layer_size = layer_size;
-            }
-
-            #pragma omp for
-            for (j = 0; j < storm_size; j++) {
-                /* Get impact energy (expressed in thousandths) */
-                float energy = (float) storms[i].posval[j * 2 + 1] * 1000;
-                /* Get impact position */
-                int position = storms[i].posval[j * 2];
-
-                /* For each cell in the layer */
-//TODO: Verificar quantos pontos e que este loop percorre normalmente e ver se e sufuciente para parallelizar
-                //os tempos com este pragma ficam piores, provavelmente tem dependencias
-                //os valores de k só variam de 1 ate layer_size, sendo o valor de layer_size pequeno siginifica
-                //quantas particoes da superficie temos. A menos que a superficie seja grande, nao vale a pena
-                //#pragma omp parallel 
-                
-                // !!!!! preciso por esta variavel local, para nao se parallelizada!!!!!
-                for (int k = 0; k < layer_size; k++) {
-                    /* Update the energy value for the cell */
-                    update(privateLayer, layer_size, k, position, energy);
-                }
-	     }
+	omp_set_num_threads(4); // TEST N THREADS: use it for tests
+	
+	
+	#pragma omp parallel for
+	for( int k=0; k<layer_size; k++ ) {
+	    layer[k] = 0.0f;
+	    layer_copy[k] = 0.0f;
 	}
+	
+	int max_threads = omp_get_max_threads();
+	Storm auxStorms[max_threads][num_storms]; // variavel auxiliar para aceder aos valores
+	
+	//TODO: OPTIMIZE THIS COPY
+	for (int s=0; s<num_storms; s++) {
+		for (int p=0; p<storms[s].size * 2; p++) {
+			int aux = storms[s].posval[p];
+			for (int t=0; t<max_threads;t++) {
+				if (p == 0) { // so cria uma unica vez
+					auxStorms[t][s].posval = (int *) malloc(sizeof(int) * storms[s].size * 2);
+					if (auxStorms[t][s].posval == NULL) {
+						fprintf(stderr, "Error allocating memory for aux storm");
+						exit(EXIT_FAILURE);
+					}
+				}
+				auxStorms[t][s].posval[p] = aux;
+			}
+		}
+	}
+		
+	/* 4. Storms simulation */
+	/*
+	 *
+	 * Verificar como o openMP faz handle de nested loops, devo usar um #omp parallel for dentro do loop
+	 * ou devo usar o #pragma omp parallel for collapse(2)
+	 * verificar como e onde e melhor usar parallel for
+	 *
+	 */
+	for( int i=0; i<num_storms; i++ ) {
+	
+		#pragma omp parallel
+		{
+	    
+			int thread_num = omp_get_thread_num();
+			//printf("ThreadNum: %d\n", thread_num);
+			
+			int p_storm_size = storms[i].size;;
+			int p_layer_size = layer_size;
+			int numThreads = omp_get_num_threads();
+			//printf("Num Threads: %d\n", numThreads);
+			
+			int fromIndexWork = (p_layer_size * thread_num) / numThreads;
+			int toIndexWork = (thread_num +1 < numThreads) ? (p_layer_size * (thread_num +1)) / numThreads : p_layer_size;
 
-        //juntar resultados
-        //#pragma omp parallel for
-        //ver se istp vale a pena
-        // se usar menos threads que o maximo ira estar a somar zeros, 
-        //preciso arranjar outra forma de ver quantas threads foram usadas
-        for (k = 0; k < layer_size; k++) {
-            for (int l = 0; l < max_thread_num; l++) { 
-                layer[k] += individualLayer[k + layer_size * l];
-            }
-        }
 
-        
-        free(individualLayer);
+			/* 4.1. Add impacts energies to layer cells */
+			/* For each particle */
+			for (int j = 0; j < p_storm_size; j++) {
+			    /* Get impact energy (expressed in thousandths) */
+			    float energy = (float) auxStorms[thread_num][i].posval[j * 2 + 1] * 1000;
+			    /* Get impact position */
+			    int position = auxStorms[thread_num][i].posval[j * 2];
 
-        /* 4.2. Energy relaxation between storms */
-        /* 4.2.1. Copy values to the ancillary array */
-        //#pragma omp parallel for
-        //TODO: verificar os valores de layer_size
-        for( k=0; k<layer_size; k++ ) 
-            layer_copy[k] = layer[k];
+			    /* For each cell in the layer */
+			    for (int k = fromIndexWork; k < toIndexWork; k++) {
+			        /* Update the energy value for the cell */
+			        update(layer, layer_size, k, position, energy);
+			    }
+		 	}
+		}
+		
+		#pragma omp parallel
+		{
 
-        /* 4.2.2. Update layer using the ancillary values.
-                  Skip updating the first and last positions */
-//TODO: Nesta parte, esta a ser lido de um vetor e escrito noutro por isso nao ha dependencias entre as iteracoes
-        //#pragma omp parallel for
-        //TODO: verificar os valores de layer_size
-        for( k=1; k<layer_size-1; k++ )
-            layer[k] = ( layer_copy[k-1] + layer_copy[k] + layer_copy[k+1] ) / 3;
+			/* 4.2. Energy relaxation between storms */
+			/* 4.2.1. Copy values to the ancillary array */
+			#pragma omp for //NOTA: implied barrier
+			for( int k=0; k<layer_size; k++ ) 
+			    layer_copy[k] = layer[k];
 
-        /* 4.3. Locate the maximum value in the layer, and its position */
-//TODO: verificar se nao ha dependencias entre as iteracoes
-//  mas acho que nao tem, ver isto melhor
-        //#pragma omp parallel for
-        //em principio os resultados ficam ok com este pragma mas temos de verificar os valore de layer_size para ver se vale a pena
-        //TODO: verificar os valores de layer_siz
-        for( k=1; k<layer_size-1; k++ ) {
-            /* Check it only if it is a local maximum */
-            if ( layer[k] > layer[k-1] && layer[k] > layer[k+1] ) {
-                if ( layer[k] > maximum[i] ) {
-                    maximum[i] = layer[k];
-                    positions[i] = k;
-                }
-            }
-        }
+			/* 4.2.2. Update layer using the ancillary values.
+			          Skip updating the first and last positions */
+			#pragma omp for //NOTA: implied barrier
+			for( int k=1; k<layer_size-1; k++ )
+			    layer[k] = ( layer_copy[k-1] + layer_copy[k] + layer_copy[k+1] ) / 3;
 
-    }
+			/* 4.3. Locate the maximum value in the layer, and its position */
+			#pragma omp for
+			for( int k=1; k<layer_size-1; k++ ) {
+			    /* Check it only if it is a local maximum */
+			    if ( layer[k] > layer[k-1] && layer[k] > layer[k+1] ) {
+			        if ( layer[k] > maximum[i] ) {
+			            maximum[i] = layer[k];
+			            positions[i] = k;
+			        }
+			    }
+			}
+		}
+
+	}
 
     /* END: Do NOT optimize/parallelize the code below this point */
 
@@ -346,12 +292,12 @@ int main(int argc, char *argv[]) {
     printf("Time: %lf\n", ttotal );
     /* 7.2. Print the maximum levels */
     printf("Result:");
-    for (i=0; i<num_storms; i++)
+    for (int i=0; i<num_storms; i++)
         printf(" %d %f", positions[i], maximum[i] );
     printf("\n");
 
     /* 8. Free resources */    
-    for( i=0; i<argc-2; i++ )
+    for( int i=0; i<argc-2; i++ )
         free( storms[i].posval );
 
     /* 9. Program ended successfully */
