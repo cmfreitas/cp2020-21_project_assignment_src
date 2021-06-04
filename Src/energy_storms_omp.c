@@ -184,59 +184,26 @@ int main(int argc, char *argv[]) {
 	    layer[k] = 0.0f;
 	    layer_copy[k] = 0.0f;
 	}
-	
-	int max_threads = omp_get_max_threads();
-	Storm auxStorms[max_threads][num_storms]; // variavel auxiliar para aceder aos valores
-	
-	//TODO: OPTIMIZE THIS COPY
-	for (int s=0; s<num_storms; s++) {
-		for (int p=0; p<storms[s].size * 2; p++) {
-			int aux = storms[s].posval[p];
-			for (int t=0; t<max_threads;t++) {
-				if (p == 0) { // so cria uma unica vez
-					auxStorms[t][s].posval = (int *) malloc(sizeof(int) * storms[s].size * 2);
-					if (auxStorms[t][s].posval == NULL) {
-						fprintf(stderr, "Error allocating memory for aux storm");
-						exit(EXIT_FAILURE);
-					}
-				}
-				auxStorms[t][s].posval[p] = aux;
-			}
-		}
-	}
 		
 	/* 4. Storms simulation */
-	/*
-	 *
-	 * Verificar como o openMP faz handle de nested loops, devo usar um #omp parallel for dentro do loop
-	 * ou devo usar o #pragma omp parallel for collapse(2)
-	 * verificar como e onde e melhor usar parallel for
-	 *
-	 */
 	for( int i=0; i<num_storms; i++ ) {
 	
 		#pragma omp parallel
 		{
 	    
 			int thread_num = omp_get_thread_num();
-			//printf("ThreadNum: %d\n", thread_num);
-			
-			int p_storm_size = storms[i].size;;
-			int p_layer_size = layer_size;
 			int numThreads = omp_get_num_threads();
-			//printf("Num Threads: %d\n", numThreads);
 			
-			int fromIndexWork = (p_layer_size * thread_num) / numThreads;
-			int toIndexWork = (thread_num +1 < numThreads) ? (p_layer_size * (thread_num +1)) / numThreads : p_layer_size;
-
+			int fromIndexWork = (layer_size * thread_num) / numThreads;
+			int toIndexWork = (thread_num +1 < numThreads) ? (layer_size * (thread_num +1)) / numThreads : layer_size;
 
 			/* 4.1. Add impacts energies to layer cells */
 			/* For each particle */
-			for (int j = 0; j < p_storm_size; j++) {
+			for (int j = 0; j < storms[i].size; j++) {
 			    /* Get impact energy (expressed in thousandths) */
-			    float energy = (float) auxStorms[thread_num][i].posval[j * 2 + 1] * 1000;
+			    float energy = (float) storms[i].posval[j * 2 + 1] * 1000;
 			    /* Get impact position */
-			    int position = auxStorms[thread_num][i].posval[j * 2];
+			    int position = storms[i].posval[j * 2];
 
 			    /* For each cell in the layer */
 			    for (int k = fromIndexWork; k < toIndexWork; k++) {
