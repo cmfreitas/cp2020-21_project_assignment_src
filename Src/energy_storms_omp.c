@@ -176,7 +176,7 @@ int main(int argc, char *argv[]) {
     }
     
     
-	omp_set_num_threads(4); // TEST N THREADS: use it for tests
+	//omp_set_num_threads(4);
 	
 	
 	#pragma omp parallel for
